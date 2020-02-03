@@ -273,7 +273,7 @@ public class UniqueIDReadWriteLDAPUserStoreManager extends UniqueIDReadOnlyLDAPU
             Map<String, String> claims) throws UserStoreException {
 
         /* getting search base directory context */
-        DirContext dirContext = getSearchBaseDirectoryContext();
+        DirContext dirContext = getSearchBaseDirectoryContext(LDAPConstants.USER_SEARCH_BASE);
 
         /* getting add user basic attributes */
         BasicAttributes basicAttributes = getAddUserBasicAttributes(userName);
@@ -427,11 +427,11 @@ public class UniqueIDReadWriteLDAPUserStoreManager extends UniqueIDReadOnlyLDAPU
      * @throws NamingException
      * @throws UserStoreException
      */
-    protected DirContext getSearchBaseDirectoryContext() throws UserStoreException {
+    protected DirContext getSearchBaseDirectoryContext(String searchBaseProperty) throws UserStoreException {
 
         DirContext mainDirContext = this.connectionSource.getContext();
         // assume first search base in case of multiple definitions
-        String searchBase = realmConfig.getUserStoreProperty(LDAPConstants.USER_SEARCH_BASE).split("#")[0];
+        String searchBase = realmConfig.getUserStoreProperty(searchBaseProperty).split("#")[0];
         try {
             return (DirContext) mainDirContext.lookup(escapeDNForSearch(searchBase));
         } catch (NamingException e) {

@@ -17,10 +17,13 @@
  */
 package org.wso2.carbon.user.core.ldap;
 
+import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.wso2.carbon.base.MultitenantConstants;
+import org.wso2.carbon.context.CarbonContext;
 import org.wso2.carbon.user.api.Properties;
 import org.wso2.carbon.user.api.Property;
 import org.wso2.carbon.user.api.RealmConfiguration;
@@ -33,6 +36,7 @@ import org.wso2.carbon.user.core.common.Group;
 import org.wso2.carbon.user.core.common.User;
 import org.wso2.carbon.user.core.profile.ProfileConfigurationManager;
 import org.wso2.carbon.user.core.util.JNDIUtil;
+import org.wso2.carbon.user.core.util.UserCoreUtil;
 import org.wso2.carbon.utils.Secret;
 import org.wso2.carbon.utils.UnsupportedSecretTypeException;
 
@@ -40,6 +44,7 @@ import javax.naming.Name;
 import javax.naming.NameParser;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
+import javax.naming.PartialResultException;
 import javax.naming.directory.Attribute;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.BasicAttribute;
@@ -51,6 +56,8 @@ import javax.naming.directory.ModificationItem;
 import javax.naming.directory.NoSuchAttributeException;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
+
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -58,6 +65,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -65,6 +73,8 @@ import java.util.StringTokenizer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import static org.wso2.carbon.user.core.ldap.ActiveDirectoryUserStoreConstants.TRANSFORM_OBJECTGUID_TO_UUID;
 
 /**
  * This class is responsible for manipulating Microsoft Active Directory(AD)and Active Directory
@@ -114,7 +124,9 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
      * @throws UserStoreException
      */
     public UniqueIDActiveDirectoryUserStoreManager(RealmConfiguration realmConfig, Map<String, Object> properties,
-            ClaimManager claimManager, ProfileConfigurationManager profileManager, UserRealm realm, Integer tenantId)
+                                                   ClaimManager claimManager,
+                                                   ProfileConfigurationManager profileManager, UserRealm realm,
+                                                   Integer tenantId)
             throws UserStoreException {
 
         super(realmConfig, properties, claimManager, profileManager, realm, tenantId);
@@ -128,7 +140,8 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
      * @throws UserStoreException
      */
     public UniqueIDActiveDirectoryUserStoreManager(RealmConfiguration realmConfig, ClaimManager claimManager,
-            ProfileConfigurationManager profileManager) throws UserStoreException {
+                                                   ProfileConfigurationManager profileManager)
+            throws UserStoreException {
 
         super(realmConfig, claimManager, profileManager);
         checkRequiredUserStoreConfigurations();
@@ -136,21 +149,21 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
 
     @Override
     public void doAddUser(String userName, Object credential, String[] roleList, Map<String, String> claims,
-            String profileName) throws UserStoreException {
+                          String profileName) throws UserStoreException {
 
         throw new UserStoreException("Operation is not supported.");
     }
 
     @Override
     public void doAddUser(String userName, Object credential, String[] roleList, Map<String, String> claims,
-            String profileName, boolean requirePasswordChange) throws UserStoreException {
+                          String profileName, boolean requirePasswordChange) throws UserStoreException {
 
         throw new UserStoreException("Operation is not supported.");
     }
 
     @Override
     public User doAddUserWithID(String userName, Object credential, String[] roleList, Map<String, String> claims,
-            String profileName, boolean requirePasswordChange) throws UserStoreException {
+                                String profileName, boolean requirePasswordChange) throws UserStoreException {
 
         String userID = getUniqueUserID();
         persistUser(userID, userName, credential, roleList, claims);
@@ -179,12 +192,12 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
      */
     @Override
     protected void persistUser(String userID, String userName, Object credential, String[] roleList,
-            Map<String, String> claims) throws UserStoreException {
+                               Map<String, String> claims) throws UserStoreException {
 
         boolean isUserBinded = false;
 
         // getting search base directory context
-        DirContext dirContext = getSearchBaseDirectoryContext();
+        DirContext dirContext = getSearchBaseDirectoryContext(LDAPConstants.USER_SEARCH_BASE);
 
         // getting add user basic attributes
         BasicAttributes basicAttributes = getAddUserBasicAttributes(userName);
@@ -212,6 +225,7 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
             compoundName = ldapParser.parse(LDAPConstants.CN + "=" + escapeSpecialCharactersForDN(userName));
 
             // Bind the user. A disabled user account with no password.
+
             dirContext.bind(compoundName, null, basicAttributes);
             isUserBinded = true;
 
@@ -272,7 +286,7 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
      * @throws UserStoreException
      */
     protected void setUserClaims(Map<String, String> claims, BasicAttributes basicAttributes, String userID,
-            String userName) throws UserStoreException {
+                                 String userName) throws UserStoreException {
 
         if (claims != null) {
             Map<String, String> attributeValueMap = new HashMap<>();
@@ -338,7 +352,7 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
         searchFilter = searchFilter.replace("?", escapeSpecialCharactersForFilter(userName));
 
         SearchControls searchControl = new SearchControls();
-        String[] returningAttributes = { "CN" };
+        String[] returningAttributes = {"CN"};
         searchControl.setReturningAttributes(returningAttributes);
         searchControl.setSearchScope(SearchControls.SUBTREE_SCOPE);
         DirContext subDirContext = null;
@@ -426,7 +440,7 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
         String searchFilter = realmConfig.getUserStoreProperty(LDAPConstants.USER_NAME_SEARCH_FILTER);
         searchFilter = searchFilter.replace("?", escapeSpecialCharactersForFilter(userName));
         SearchControls searchControl = new SearchControls();
-        String[] returningAttributes = { "CN" };
+        String[] returningAttributes = {"CN"};
         searchControl.setReturningAttributes(returningAttributes);
         searchControl.setSearchScope(SearchControls.SUBTREE_SCOPE);
 
@@ -536,6 +550,7 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
      * @return byte[]
      */
     private byte[] createUnicodePassword(Secret password) {
+
         char[] passwordChars = password.getChars();
         char[] quotedPasswordChars = new char[passwordChars.length + 2];
 
@@ -670,14 +685,6 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
     }
 
     @Override
-    public List<Group> doGetGroupList(int limit, int offset, String sortBy, String sortOrder)
-            throws UserStoreException {
-
-        logger.error("+++++++++++++++++++UniqueIDActiveDirectoryUserstore ++++++++++++++++++++++++++++++++");
-       return new ArrayList<>();
-    }
-
-    @Override
     public Properties getDefaultUserStoreProperties() {
 
         Properties properties = new Properties();
@@ -755,20 +762,20 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
             for (int i = 0; i < dnPartial.length(); i++) {
                 char currentChar = dnPartial.charAt(i);
                 switch (currentChar) {
-                case '\\':
-                    sb.append("\\5c");
-                    break;
-                case '(':
-                    sb.append("\\28");
-                    break;
-                case ')':
-                    sb.append("\\29");
-                    break;
-                case '\u0000':
-                    sb.append("\\00");
-                    break;
-                default:
-                    sb.append(currentChar);
+                    case '\\':
+                        sb.append("\\5c");
+                        break;
+                    case '(':
+                        sb.append("\\28");
+                        break;
+                    case ')':
+                        sb.append("\\29");
+                        break;
+                    case '\u0000':
+                        sb.append("\\00");
+                        break;
+                    default:
+                        sb.append(currentChar);
                 }
             }
             return sb.toString();
@@ -804,29 +811,29 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
             for (int i = 0; i < text.length(); i++) {
                 char currentChar = text.charAt(i);
                 switch (currentChar) {
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case ',':
-                    sb.append("\\,");
-                    break;
-                case '+':
-                    sb.append("\\+");
-                    break;
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '<':
-                    sb.append("\\<");
-                    break;
-                case '>':
-                    sb.append("\\>");
-                    break;
-                case ';':
-                    sb.append("\\;");
-                    break;
-                default:
-                    sb.append(currentChar);
+                    case '\\':
+                        sb.append("\\\\");
+                        break;
+                    case ',':
+                        sb.append("\\,");
+                        break;
+                    case '+':
+                        sb.append("\\+");
+                        break;
+                    case '"':
+                        sb.append("\\\"");
+                        break;
+                    case '<':
+                        sb.append("\\<");
+                        break;
+                    case '>':
+                        sb.append("\\>");
+                        break;
+                    case ';':
+                        sb.append("\\;");
+                        break;
+                    default:
+                        sb.append(currentChar);
                 }
             }
             if ((text.length() > 1) && (text.charAt(text.length() - 1) == ' ')) {
@@ -988,5 +995,276 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
         Instant instant = offsetDateTime.toInstant();
         return instant.toString();
     }
+
+    @Override
+    public List<Group> doGetGroupList(int limit, int offset, String sortBy, String sortOrder)
+            throws UserStoreException {
+
+        if (limit == 0) {
+            return null;
+        }
+        logger.error("+++++++++++++++++++UniqueIDActiveDirectoryUserstore ++++++++++++++++++++++++++++++++");
+        int givenMax = UserCoreConstants.MAX_USER_ROLE_LIST;
+
+        int searchTime = UserCoreConstants.MAX_SEARCH_TIME;
+
+        try {
+            givenMax = Integer.parseInt(realmConfig.
+                    getUserStoreProperty(UserCoreConstants.RealmConfig.PROPERTY_MAX_ROLE_LIST));
+        } catch (Exception e) {
+            givenMax = UserCoreConstants.MAX_USER_ROLE_LIST;
+        }
+
+        try {
+            searchTime = Integer.parseInt(realmConfig.
+                    getUserStoreProperty(UserCoreConstants.RealmConfig.PROPERTY_MAX_SEARCH_TIME));
+        } catch (Exception e) {
+            searchTime = UserCoreConstants.MAX_SEARCH_TIME;
+        }
+
+        if (limit < 0 || limit > givenMax) {
+            limit = givenMax;
+        }
+
+        List<Group> externalGroups = new ArrayList<Group>();
+
+        if (readGroupsEnabled) {
+            // handling multiple search bases
+            String searchBases = realmConfig.getUserStoreProperty(LDAPConstants.GROUP_SEARCH_BASE);
+            String[] searchBaseArray = searchBases.split("#");
+            for (String searchBase : searchBaseArray) {
+                // get the role list from the group search base
+                externalGroups.addAll(getLDAPGroups(searchTime, limit,
+                        realmConfig.getUserStoreProperty(LDAPConstants.GROUP_NAME_LIST_FILTER),
+                        realmConfig.getUserStoreProperty(LDAPConstants.GROUP_NAME_ATTRIBUTE),
+                        realmConfig.getUserStoreProperty(ActiveDirectoryUserStoreConstants.GROUP_ID_ATTRIBUTE),
+                        searchBase, true));
+            }
+
+        }
+
+        return externalGroups;
+    }
+
+    protected List<Group> getLDAPGroups(int searchTime,
+                                        int maxItemLimit,
+                                        String searchFilter,
+                                        String groupNameProperty,
+                                        String groupIDProperty,
+                                        String searchBase,
+                                        boolean appendTenantDomain) throws UserStoreException {
+
+        boolean debug = logger.isDebugEnabled();
+        List<Group> groups = new ArrayList<Group>();
+
+        SearchControls searchCtls = new SearchControls();
+        searchCtls.setSearchScope(SearchControls.SUBTREE_SCOPE);
+        searchCtls.setCountLimit(maxItemLimit);
+        searchCtls.setTimeLimit(searchTime);
+
+        String returnedAtts[] = {groupNameProperty};
+        searchCtls.setReturningAttributes(returnedAtts);
+
+        // / search filter TODO
+        StringBuffer finalFilter = new StringBuffer();
+        finalFilter.append("(&").append(searchFilter).append("(").append(groupNameProperty).append("=").append("*))");
+        if (debug) {
+            logger.debug("Listing groups. SearchBase: " + searchBase + " ConstructedFilter: " +
+                    finalFilter.toString());
+        }
+
+        DirContext dirContext = null;
+        NamingEnumeration<SearchResult> answer = null;
+        String[] propertyNames = {groupIDProperty,
+                ActiveDirectoryUserStoreConstants.WHEN_CHANGED, ActiveDirectoryUserStoreConstants.WHEN_CREATED};
+        Map<String, String> groupAttributes = new HashMap<>();
+
+        try {
+            dirContext = connectionSource.getContext();
+            answer = dirContext.search(escapeDNForSearch(searchBase), finalFilter.toString(), searchCtls);
+            // append the domain if exist
+            String domain =
+                    this.getRealmConfiguration()
+                            .getUserStoreProperty(UserCoreConstants.RealmConfig.PROPERTY_DOMAIN_NAME);
+
+            while (answer.hasMoreElements()) {
+                SearchResult sr = (SearchResult) answer.next();
+                if (sr.getAttributes() != null) {
+                    Group group = new Group();
+                    Attribute nameAttr = sr.getAttributes().get(groupNameProperty);
+                    if (nameAttr != null) {
+                        String name = (String) nameAttr.get();
+                        groupAttributes = getGroupAttributes(name, propertyNames);
+                        name = UserCoreUtil.addDomainToName(name, domain);
+                        if (appendTenantDomain) {
+                            String dn = sr.getNameInNamespace();
+                            name = UserCoreUtil.addTenantDomainToEntry(name,
+                                    getTenantDomainFromRoleDN(dn, name));
+                        }
+                        group.setGroupName(name);
+                        if (!groupAttributes.isEmpty()) {
+                            for (Map.Entry attrEntry : groupAttributes.entrySet()) {
+                                setValuesToGroup(group, attrEntry.getKey().toString(), attrEntry.getValue());
+                            }
+                        }
+                        groups.add(group);
+                    }
+                }
+            }
+        } catch (PartialResultException e) {
+            // can be due to referrals in AD. so just ignore error
+            String errorMessage =
+                    "Error occurred while getting LDAP role names. SearchBase: " + searchBase + " ConstructedFilter: " +
+                            finalFilter.toString();
+            logger.error(errorMessage, e);
+        } catch (NamingException e) {
+            String errorMessage =
+                    "Error occurred while getting LDAP role names. SearchBase: " + searchBase + " ConstructedFilter: " +
+                            finalFilter.toString();
+            if (logger.isDebugEnabled()) {
+                logger.debug(errorMessage, e);
+            }
+            throw new UserStoreException(errorMessage, e);
+        } finally {
+            JNDIUtil.closeNamingEnumeration(answer);
+            JNDIUtil.closeContext(dirContext);
+        }
+
+        if (debug) {
+            Iterator<Group> rolesIte = groups.iterator();
+            while (rolesIte.hasNext()) {
+                logger.info("result ++++: " + rolesIte.next().getGroupName());
+            }
+        }
+
+        return groups;
+    }
+
+    private void setValuesToGroup(Group group, String property, Object value) {
+
+        Map<String, String> attributes;
+        String attr = null;
+        byte[] bytes = new byte[0];
+        if (value instanceof String) {
+            attr = (String) value;
+        } else if (value instanceof byte[]) {
+            // return canonical representation of UUIDs or base64 encoded string of other binary data
+            // Active Directory attribute: objectGUID
+            // RFC 4530 attribute: entryUUID
+            bytes = (byte[]) value;
+        }
+        switch (property) {
+            case ActiveDirectoryUserStoreConstants.OBJECT_GUID :
+
+               String id;
+                String transformToUUID =
+                        realmConfig.getUserStoreProperty(TRANSFORM_OBJECTGUID_TO_UUID);
+
+                boolean transformObjectGuidToUuid = StringUtils.isEmpty(transformToUUID) ||
+                        Boolean.parseBoolean(transformToUUID);
+                if (transformObjectGuidToUuid) {
+                    final ByteBuffer bb = ByteBuffer.wrap(swapBytes(bytes));
+                    id = new java.util.UUID(bb.getLong(), bb.getLong()).toString();
+                } else {
+                    // Ignore transforming objectGUID to UUID canonical format
+                    id = new String(Base64.encodeBase64((byte[]) value));
+                }
+                group.setGroupID(id);
+                break;
+
+            case ActiveDirectoryUserStoreConstants.WHEN_CREATED :
+                if (group.getAttributes() == null) {
+                    attributes = new HashMap<>();
+                    attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CREATED, attr);
+                    group.setAttributes(attributes);
+                } else {
+                    attributes = group.getAttributes();
+                    if (attributes.get(ActiveDirectoryUserStoreConstants.WHEN_CREATED) != null) {
+                        attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CREATED, attr);
+                        group.setAttributes(attributes);
+                    }
+                }
+                break;
+            case ActiveDirectoryUserStoreConstants.WHEN_CHANGED:
+                if (group.getAttributes() == null) {
+                    attributes = new HashMap<>();
+                    attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CHANGED, attr);
+                    group.setAttributes(attributes);
+                } else {
+                    attributes = group.getAttributes();
+                    if (attributes.get(ActiveDirectoryUserStoreConstants.WHEN_CHANGED) != null) {
+                        attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CHANGED, attr);
+                        group.setAttributes(attributes);
+                    }
+                }
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private Map<String, String> getGroupAttributes(String groupName, String[] propertyNames) throws
+            NamingException, UserStoreException {
+
+        Map<String, String> groupAttributes = new HashMap<>();
+        DirContext dirContext = getSearchBaseDirectoryContext(LDAPConstants.GROUP_SEARCH_BASE);
+
+        NameParser ldapParser = dirContext.getNameParser("");
+        Name compoundName = ldapParser.parse("cn=" + escapeSpecialCharactersForDN(groupName));
+
+        Attributes attributeList = dirContext.getAttributes(compoundName, propertyNames);
+        if (attributeList.size() > 0) {
+            NamingEnumeration<? extends Attribute> i = attributeList.getAll();
+            while (i.hasMore()) {
+                Attribute attribute = i.next();
+                groupAttributes.put(attribute.getID(), attribute.get().toString());
+            }
+
+        }
+        return groupAttributes;
+    }
+
+        /**
+         * Get the tenant domain for the provided distinguished name. If the role is
+         * not a shared role returns the super tenant domain
+         *
+         * @param dn
+         * @param roleName
+         * @return
+         */
+        public String getTenantDomainFromRoleDN (String dn, String roleName) {
+
+            dn = dn.toLowerCase();
+            roleName = roleName.toLowerCase();
+            String sharedSearchBase = realmConfig.getUserStoreProperties().
+                    get(LDAPConstants.SHARED_GROUP_SEARCH_BASE);
+
+            if (sharedSearchBase != null) {
+                sharedSearchBase = sharedSearchBase.toLowerCase();
+                if (dn.indexOf(sharedSearchBase) > -1) {
+                    dn = dn.replaceAll(sharedSearchBase, "");
+                    dn = dn.replace(realmConfig.getUserStoreProperty(LDAPConstants.SHARED_GROUP_NAME_ATTRIBUTE).
+                            toLowerCase() + "=" + roleName, "");
+                    if (dn.indexOf(",") == 0) {
+                        dn = dn.substring(1);
+                    }
+                    int lastIndex = dn.indexOf(",");
+                    if (lastIndex > -1 && lastIndex == dn.length() - 1) {
+                        dn = dn.substring(0, dn.length() - 1);
+                    }
+
+                    String groupNameAttributeName = realmConfig.
+                            getUserStoreProperty(LDAPConstants.SHARED_TENANT_NAME_ATTRIBUTE).toLowerCase();
+                    dn = dn.replaceAll(groupNameAttributeName + "=", "");
+                    if (dn == null || dn.isEmpty()) {
+                        dn = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
+                    }
+                    return dn;
+                }
+            }
+            return CarbonContext.getThreadLocalCarbonContext().getTenantDomain();
+        }
+
 
 }

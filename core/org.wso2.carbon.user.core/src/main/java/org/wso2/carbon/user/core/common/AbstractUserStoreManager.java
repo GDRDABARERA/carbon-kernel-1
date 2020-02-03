@@ -137,7 +137,7 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
     // User roles cache
     protected UserRolesCache userRolesCache = null;
     protected SystemUserRoleManager systemUserRoleManager = null;
-    protected boolean readGroupsEnabled = false;
+    protected boolean readGroupsEnabled = true;
     protected boolean writeGroupsEnabled = false;
     private UserStoreManager secondaryUserStoreManager;
     private boolean userRolesCacheEnabled = true;
@@ -14607,11 +14607,11 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
     }
 
     @Override
-    public List<Group> getGroupList(boolean noHybridGroups, boolean noSystemGroups, int limit, int offset,
+    public List<Group> getGroupList(boolean noHybridGroups, boolean noSystemGroups, Integer limit, Integer offset,
                                     String sortBy, String sortOrder) throws UserStoreException {
 
         if (!isSecureCall.get()) {
-            Class argTypes[] = new Class[]{boolean.class, boolean.class, int.class, int.class, String.class,
+            Class argTypes[] = new Class[]{boolean.class, boolean.class, Integer.class, Integer.class, String.class,
                     String.class};
             Object object = callSecure("getGroupList", new Object[]{noHybridGroups, noSystemGroups, limit,
                             offset, sortBy, sortOrder},
@@ -14630,48 +14630,44 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
 
         }
 
-//        String primaryDomain = getMyDomainName();
+        String primaryDomain = getMyDomainName();
 
-        if (this.getSecondaryUserStoreManager() != null) {
-            for (Map.Entry<String, UserStoreManager> entry : userStoreManagerHolder.entrySet()) {
-//                if (entry.getKey().equalsIgnoreCase(primaryDomain)) {
-//                    continue;
-//                }
-                UserStoreManager storeManager = entry.getValue();
-                if (storeManager instanceof AbstractUserStoreManager) {
-                    try {
-                        if (readGroupsEnabled) {
-                            List<Group> userstoreGroupList = ((AbstractUserStoreManager) storeManager)
-                                    .doGetGroupList(limit, offset, sortBy, sortOrder);
-                            groupList = Stream
-                                    .of(groupList, userstoreGroupList)
-                                    .flatMap(Collection::stream)
-                                    .collect(Collectors.toList());
-                        }
-                    } catch (UserStoreException e) {
-                        // We can ignore and proceed. Ignore the results from this user store.
-                        log.error(e);
+//        if (this.getSecondaryUserStoreManager() != null) {
+        for (Map.Entry<String, UserStoreManager> entry : userStoreManagerHolder.entrySet()) {
+//            if (entry.getKey().equalsIgnoreCase(primaryDomain)) {
+//                continue;
+//            }
+            UserStoreManager storeManager = entry.getValue();
+            if (storeManager instanceof AbstractUserStoreManager) {
+                try {
+                    if (readGroupsEnabled) {
+                        List<Group> userstoreGroupList = ((AbstractUserStoreManager) storeManager)
+                                .doGetGroupList(MAX_ITEM_LIMIT_UNLIMITED, offset, sortBy, sortOrder);
+                        groupList = Stream
+                                .of(groupList, userstoreGroupList)
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList());
                     }
-                } else {
-                    // TODO: 2020-01-29 decide this part
+                } catch (UserStoreException e) {
+                    // We can ignore and proceed. Ignore the results from this user store.
+                    log.error(e);
+                }
+            } else {
+                // TODO: 2020-01-29 decide this part
 //                    groupList = Stream
 //                            .of(groupList, storeManager.getGroupList())
 //                            .flatMap(Collection::stream)
 //                            .collect(Collectors.toList());
-                }
             }
         }
+//        }
         return groupList;
     }
 
     public List<Group> doGetGroupList(int limit, int offset, String sortBy, String sortOrder)
             throws UserStoreException {
 
-        if (log.isDebugEnabled()) {
-            log.debug("doGetUserListFromPropertiesWithID operation is not implemented in: " + this.getClass());
-        }
-        throw new NotImplementedException(
-                "doGetUserListFromPropertiesWithID operation is not implemented in: " + this.getClass());
+        return new ArrayList<Group>();
     }
 
     @Override

@@ -43,9 +43,14 @@ public class ActiveDirectoryUserStoreConstants {
     private static final String roleDNPattern = "RoleDNPattern";
     private static final String roleDNPatternDescription = "The patten for role's DN. It can be defined to improve " +
             "the LDAP search";
+    public static final String GROUP_ID_ATTRIBUTE = "GroupIDAttribute";
 
     public static final String TRANSFORM_OBJECTGUID_TO_UUID = "transformObjectGUIDToUUID";
     public static final String TRANSFORM_OBJECTGUID_TO_UUID_DESC = "Return objectGUID in UUID Canonical Format";
+
+    public static final String OBJECT_GUID = "objectGuid";
+    public static final String WHEN_CREATED = "whenCreated";
+    public static final String WHEN_CHANGED = "whenChanged";
 
     static {
         //Set mandatory properties
@@ -91,6 +96,8 @@ public class ActiveDirectoryUserStoreConstants {
                 "Group Filter#" + UserStoreConfigConstants.groupNameListFilterDescription, null);
         Property groupNameAttribute = new Property(UserStoreConfigConstants.groupNameAttribute, "cn", "Group Name Attribute#"
                 + UserStoreConfigConstants.groupNameAttributeDescription, null);
+        Property groupIDAttribute = new Property(UserStoreConfigConstants.groupIDAttribute, "objectGuid", "Group ID " +
+                "Attribute#" + UserStoreConfigConstants.groupIDAttributeDescription, null);
         Property membershipAttribute = new Property(UserStoreConfigConstants.membershipAttribute, "member",
                 "Membership Attribute#" + UserStoreConfigConstants.membershipAttributeDescription, null);
         Property groupNameSearchFilter = new Property(UserStoreConfigConstants.groupNameSearchFilter,
@@ -106,6 +113,8 @@ public class ActiveDirectoryUserStoreConstants {
 
         setProperty(UserStoreConfigConstants.groupEntryObjectClass, "Group Entry Object Class", "group",
                 UserStoreConfigConstants.groupEntryObjectClassDescription);
+        setProperty(UserStoreConfigConstants.groupIDAttribute, "Group ID attribute", "objectGuid",
+                UserStoreConfigConstants.groupIDAttributeDescription);
         setProperty(UserStoreConfigConstants.groupNameAttribute, "Group Name Attribute", "cn",
                 UserStoreConfigConstants.groupNameAttributeDescription);
         setProperty(UserStoreConfigConstants.groupNameSearchFilter, "Group Search Filter", "(&(objectClass=group)(cn=?))",

@@ -444,7 +444,7 @@ public interface UniqueIDUserStoreManager extends UserStoreManager {
      * @return List of groups available in the system.
      * @throws UserStoreException thrown by the underlying UserStoreManager.
      */
-    List<Group> getGroupList(boolean noHybridGroups, boolean noSystemGroups, int limit, int offset,
+    List<Group> getGroupList(boolean noHybridGroups, boolean noSystemGroups, Integer limit, Integer offset,
                           String sortBy, String sortOrder) throws UserStoreException;
 
     /**

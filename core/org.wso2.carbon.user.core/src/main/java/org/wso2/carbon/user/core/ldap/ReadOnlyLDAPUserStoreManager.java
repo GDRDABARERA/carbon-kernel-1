@@ -1520,7 +1520,7 @@ public class ReadOnlyLDAPUserStoreManager extends AbstractUserStoreManager {
      * @param roleName
      * @return
      */
-    private String getTenantDomainFromRoleDN(String dn, String roleName) {
+    String getTenantDomainFromRoleDN(String dn, String roleName) {
 
         dn = dn.toLowerCase();
         roleName = roleName.toLowerCase();
