@@ -1400,8 +1400,7 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
             try {
                 // Let's authenticate with the primary UserStoreManager.
                 if (abstractUserStoreManager.isUniqueUserIdEnabled()) {
-                    String userNameProperty = claimManager
-                            .getAttributeName(getMyDomainName(), UserCoreClaimConstants.USERNAME_CLAIM_URI);
+                    String userNameProperty = getUsernameProperty();
                     AuthenticationResult authenticationResult = abstractUserStoreManager
                             .doAuthenticateWithID(userNameProperty, userName, credential, null);
                     if (authenticationResult.getAuthenticationStatus()
@@ -1479,6 +1478,16 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
         }
 
         return authenticated;
+    }
+
+    private String getUsernameProperty() throws org.wso2.carbon.user.api.UserStoreException {
+
+        String userNameProperty = realmConfig.getUserStoreProperty(LDAPConstants.USER_NAME_ATTRIBUTE);
+        if (StringUtils.isBlank(userNameProperty)) {
+             userNameProperty = claimManager
+                    .getAttributeName(getMyDomainName(), UserCoreClaimConstants.USERNAME_CLAIM_URI);
+        }
+        return userNameProperty;
     }
 
     /**
@@ -3192,8 +3201,7 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
 
             boolean isAuth;
             if (isUniqueUserIdEnabled) {
-                String preferredUserNameProperty = claimManager.getAttributeName(getMyDomainName(),
-                        UserCoreClaimConstants.USERNAME_CLAIM_URI);
+                String preferredUserNameProperty = getUsernameProperty();
                 isAuth = this.doAuthenticateWithID(preferredUserNameProperty, userName, oldCredentialObj, null)
                         .getAuthenticationStatus() == AuthenticationResult.AuthenticationStatus.SUCCESS;
             } else {
@@ -3698,7 +3706,6 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
         if (isUniqueUserIdEnabled) {
             userID = getUserIDFromUserName(userName);
             isUserExists = userID != null;
-            clearUserIDResolverCache(userName, userStore, userID);
         } else {
             isUserExists = doCheckExistingUser(userName);
         }
@@ -3713,6 +3720,8 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
 
         // Remove users from internal role mapping
         try {
+
+            clearUserIDResolverCache(userID, userName, userStore);
             if (isUniqueUserIdEnabled) {
                 hybridRoleManager.deleteUser(UserCoreUtil.addDomainToName(userName, getMyDomainName()));
                 doDeleteUserWithID(userID);
@@ -6009,18 +6018,6 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
         }
 
         handlePostGetUserList(null, null, new ArrayList<>(Arrays.asList(userList)), true);
-        return userList;
-    }
-
-    private String[] getUserNamesList(String[] userList) throws UserStoreException {
-
-        if (isUniqueUserIdEnabled()) {
-            List<String> userNamesList = new ArrayList<>();
-            for (String userID : userList) {
-                userNamesList.add(getUserClaimValueWithID(userID, UserCoreClaimConstants.USERNAME_CLAIM_URI, null));
-            }
-            userList = userNamesList.toArray(new String[0]);
-        }
         return userList;
     }
 
@@ -11836,13 +11833,12 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
                         RESOLVE_USER_NAME_FROM_USER_ID_CACHE_NAME, tenantId);
     }
 
-    private void clearUserIDResolverCache(String userName, UserStore userStore, String userID) {
+    private void clearUserIDResolverCache(String userID, String userName, UserStore userStore) {
 
         UserIdResolverCache.getInstance()
                 .clearCacheEntry(UserCoreUtil.addDomainToName(userName, userStore.getDomainName()),
                         RESOLVE_USER_ID_FROM_USER_NAME_CACHE_NAME, tenantId);
-        UserIdResolverCache.getInstance()
-                .clearCacheEntry(userID, RESOLVE_USER_NAME_FROM_USER_ID_CACHE_NAME, tenantId);
+        UserIdResolverCache.getInstance().clearCacheEntry(userID, RESOLVE_USER_NAME_FROM_USER_ID_CACHE_NAME, tenantId);
     }
 
     /**
@@ -12112,13 +12108,14 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
 
         User user = null;
         boolean isUserEixisting;
-        String userNameFromUserID = null;
+        String userName;
         if (isUniqueUserIdEnabledInUserStore(userStore)) {
-            userNameFromUserID = doGetUserNameFromUserID(userID);
-            isUserEixisting = userNameFromUserID != null;
+            userName = doGetUserNameFromUserID(userID);
+            isUserEixisting = userName != null;
         } else {
             user = userUniqueIDManger.getUser(userID, this);
             isUserEixisting = user != null;
+            userName = user.getUsername();
         }
 
         if (!isUserEixisting) {
@@ -12130,14 +12127,15 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
         }
 
         try {
+
+            clearUserIDResolverCache(userID, userName, userStore);
             // If unique id feature is not enabled, we have to call the legacy methods.
-            if (!isUniqueUserIdEnabledInUserStore(userStore)) {
-                hybridRoleManager.deleteUser(user.getDomainQualifiedUsername());
-                doDeleteUser(user.getUsername());
-            } else {
-                hybridRoleManager.deleteUser(
-                        UserCoreUtil.addDomainToName(userNameFromUserID, getMyDomainName()));
+            if (isUniqueUserIdEnabledInUserStore(userStore)) {
+                hybridRoleManager.deleteUser(UserCoreUtil.addDomainToName(userName, getMyDomainName()));
                 doDeleteUserWithID(userID);
+            } else {
+                hybridRoleManager.deleteUser(user.getDomainQualifiedUsername());
+                doDeleteUser(userName);
             }
         } catch (UserStoreException e) {
             handleDeleteUserFailureWithID(ErrorMessages.ERROR_CODE_ERROR_WHILE_DELETING_USER.getCode(),
@@ -12147,7 +12145,7 @@ public abstract class AbstractUserStoreManager implements PaginatedUserStoreMana
         }
 
         // Needs to clear roles cache upon deletion of a user
-        clearUserRolesCache(userNameFromUserID != null ? userNameFromUserID : user.getUsername());
+        clearUserRolesCache(userName);
 
         // #################### <Listeners> #####################################################
         try {

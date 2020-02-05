@@ -49,6 +49,16 @@ import org.wso2.carbon.user.core.service.RealmService;
 import org.wso2.carbon.user.core.util.JNDIUtil;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
 
+import java.nio.ByteBuffer;
+import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+
 import javax.cache.Cache;
 import javax.cache.CacheBuilder;
 import javax.cache.CacheConfiguration;
@@ -124,12 +134,10 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
     }
 
     public UniqueIDReadOnlyLDAPUserStoreManager() {
-
     }
 
     public UniqueIDReadOnlyLDAPUserStoreManager(RealmConfiguration realmConfig, Map<String, Object> properties,
-                                                ClaimManager claimManager, ProfileConfigurationManager profileManager,
-                                                UserRealm realm, Integer tenantId)
+            ClaimManager claimManager, ProfileConfigurationManager profileManager, UserRealm realm, Integer tenantId)
             throws UserStoreException {
 
         super(realmConfig, properties, claimManager, profileManager, realm, tenantId, false);
@@ -147,9 +155,8 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
      * @throws UserStoreException
      */
     public UniqueIDReadOnlyLDAPUserStoreManager(RealmConfiguration realmConfig, Map<String, Object> properties,
-                                                ClaimManager claimManager, ProfileConfigurationManager profileManager,
-                                                UserRealm realm, Integer tenantId,
-                                                boolean skipInitData) throws UserStoreException {
+            ClaimManager claimManager, ProfileConfigurationManager profileManager, UserRealm realm, Integer tenantId,
+            boolean skipInitData) throws UserStoreException {
 
         super(realmConfig, properties, claimManager, profileManager, realm, tenantId, skipInitData);
     }
@@ -160,7 +167,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
      * Internal roles.
      */
     public UniqueIDReadOnlyLDAPUserStoreManager(RealmConfiguration realmConfig, ClaimManager claimManager,
-                                                ProfileConfigurationManager profileManager) throws UserStoreException {
+            ProfileConfigurationManager profileManager) throws UserStoreException {
 
         super(realmConfig, claimManager, profileManager);
     }
@@ -271,7 +278,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
 
     @Override
     public AuthenticationResult doAuthenticateWithID(String preferredUserNameProperty, String preferredUserNameValue,
-                                                     Object credential, String profileName) throws UserStoreException {
+            Object credential, String profileName) throws UserStoreException {
 
         AuthenticationResult authenticationResult;
         if (!validateForWildCardCharacters(preferredUserNameValue)) {
@@ -362,7 +369,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
         if (debug) {
             log.debug("Listing users with SearchFilter: " + searchFilter);
         }
-        String[] returnedAttributes = new String[]{userPropertyName, serviceNameAttribute};
+        String[] returnedAttributes = new String[] { userPropertyName, serviceNameAttribute };
         String enableMaxUserLimitForSCIM = realmConfig
                 .getUserStoreProperty(UserCoreConstants.RealmConfig.PROPERTY_MAX_USER_LIST_FOR_SCIM);
         try {
@@ -546,7 +553,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
 
     private boolean validateForWildCardCharacters(String preferredUserNameValue) {
 
-        String[] ldapSpecialCharacters = {"*", "<", ">", "~", "!", ")", "("};
+        String[] ldapSpecialCharacters = { "*", "<", ">", "~", "!", ")", "(" };
         if (StringUtils.isNotEmpty(preferredUserNameValue)) {
             for (String ldapSpecialCharacter : ldapSpecialCharacters) {
                 if (preferredUserNameValue.contains(ldapSpecialCharacter)) {
@@ -566,7 +573,34 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
     @Override
     protected String doGetUserIDFromUserNameWithID(String userName) throws UserStoreException {
 
-        return getUserIDFromProperties(USERNAME_CLAIM_URI, userName, null);
+        String userNameProperty = realmConfig.getUserStoreProperty(LDAPConstants.USER_NAME_ATTRIBUTE);
+        return getUserIDFromProperty(userNameProperty, userName);
+    }
+
+    private String getUserIDFromProperty(String property, String claimValue) throws UserStoreException {
+
+        try {
+            List<String> userIds = this.doGetUserListFromPropertiesWithID(property, claimValue, null);
+            if (userIds.isEmpty()) {
+                if (log.isDebugEnabled()) {
+                    log.debug(
+                            "No UserID found for the property: " + property + ", value: " + claimValue + ", in domain:"
+                                    + " " + getMyDomainName());
+                }
+                return null;
+            } else if (userIds.size() > 1) {
+                throw new UserStoreException(
+                        "Invalid scenario. Multiple users cannot be found for the given value: " + claimValue
+                                + "of the " + "property: " + property);
+            } else {
+                // username can have only one userId. Take the first element.
+                return userIds.get(0);
+            }
+        } catch (org.wso2.carbon.user.api.UserStoreException e) {
+            throw new UserStoreException(
+                    "Error occurred while retrieving the userId of domain : " + getMyDomainName() + " and " + "property"
+                            + property + " value: " + claimValue, e);
+        }
     }
 
     @Override
@@ -583,21 +617,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
                 }
                 return null;
             }
-            List<String> userIds = this.doGetUserListFromPropertiesWithID(property, claimValue, profileName);
-            if (userIds.isEmpty()) {
-                if (log.isDebugEnabled()) {
-                    log.debug("No UserID found for the claim: " + claimURI + ", value: " + claimValue + ", in domain:"
-                            + " " + getMyDomainName());
-                }
-                return null;
-            } else if (userIds.size() > 1) {
-                throw new UserStoreException(
-                        "Invalid scenario. Multiple users cannot be found for the given value: " + claimValue
-                                + "of the " + "claim: " + claimURI);
-            } else {
-                // username can have only one userId. Take the first element.
-                return userIds.get(0);
-            }
+            return getUserIDFromProperty(property, claimValue);
         } catch (org.wso2.carbon.user.api.UserStoreException e) {
             throw new UserStoreException(
                     "Error occurred while retrieving the userId of domain : " + getMyDomainName() + " and " + "claim"
@@ -628,7 +648,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
     @Override
     public String[] getProfileNamesWithID(String userID) throws UserStoreException {
 
-        return new String[]{UserCoreConstants.DEFAULT_PROFILE};
+        return new String[] { UserCoreConstants.DEFAULT_PROFILE };
     }
 
     @Override
@@ -718,13 +738,13 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
         String[] returnedAttributes;
 
         if (StringUtils.isNotEmpty(displayNameAttribute)) {
-            returnedAttributes = new String[]{
+            returnedAttributes = new String[] {
                     userNameProperty, serviceNameAttribute, displayNameAttribute, userIDProperty
             };
             finalFilter.append("(&").append(searchFilter).append("(").append(displayNameAttribute).append("=")
                     .append(escapeSpecialCharactersForFilterWithStarAsRegex(filter)).append("))");
         } else {
-            returnedAttributes = new String[]{userNameProperty, serviceNameAttribute, userIDProperty};
+            returnedAttributes = new String[] { userNameProperty, serviceNameAttribute, userIDProperty };
             finalFilter.append("(&").append(searchFilter).append("(").append(userNameProperty).append("=")
                     .append(escapeSpecialCharactersForFilterWithStarAsRegex(filter)).append("))");
         }
@@ -941,7 +961,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
                     rangedMembershipProperty =
                             membershipProperty + String.format(";range=%1$d-%2$d", offset, lastRecord);
                 }
-                String[] returnedAtts = {rangedMembershipProperty};
+                String[] returnedAtts = { rangedMembershipProperty };
                 searchCtls.setReturningAttributes(returnedAtts);
 
                 SearchResult sr = null;
@@ -1058,7 +1078,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
             String userNameProperty = realmConfig.getUserStoreProperty(LDAPConstants.USER_NAME_ATTRIBUTE);
             String displayNameAttribute = realmConfig.getUserStoreProperty(LDAPConstants.DISPLAY_NAME_ATTRIBUTE);
             String userIDAttribute = realmConfig.getUserStoreProperty(LDAPConstants.USER_ID_ATTRIBUTE);
-            String[] returnedAttributes = {userNameProperty, displayNameAttribute, userIDAttribute};
+            String[] returnedAttributes = { userNameProperty, displayNameAttribute, userIDAttribute };
             User userObject = null;
 
             for (String user : userDNList) {
@@ -1241,7 +1261,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
     // ****************************************************
 
     protected List<String> getAttributeListOfOneElement(String searchBases, String searchFilter,
-                                                        SearchControls searchCtls) throws UserStoreException {
+            SearchControls searchCtls) throws UserStoreException {
 
         List<String> list = new ArrayList<>();
         DirContext dirContext = null;
@@ -1478,8 +1498,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
 
     @Override
     protected UniqueIDPaginatedSearchResult doGetUserListWithID(Condition condition, String profileName, int limit,
-                                                                int offset, String sortBy, String sortOrder)
-            throws UserStoreException {
+            int offset, String sortBy, String sortOrder) throws UserStoreException {
 
         // TODO: Need to improve this method to get the userID as well.
         PaginatedSearchResult userNames = super.doGetUserList(condition, profileName, limit, offset, sortBy, sortOrder);
@@ -1497,7 +1516,7 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
 
     @Override
     protected PaginatedSearchResult doGetUserList(Condition condition, String profileName, int limit, int offset,
-                                                  String sortBy, String sortOrder) throws UserStoreException {
+            String sortBy, String sortOrder) throws UserStoreException {
 
         throw new UserStoreException("Operation is not supported.");
     }
@@ -1584,21 +1603,21 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
 
     @Override
     public void doAddUser(String userName, Object credential, String[] roleList, Map<String, String> claims,
-                          String profileName) throws UserStoreException {
+            String profileName) throws UserStoreException {
 
         throw new UserStoreException("Operation is not supported.");
     }
 
     @Override
     public void doAddUser(String userName, Object credential, String[] roleList, Map<String, String> claims,
-                          String profileName, boolean requirePasswordChange) throws UserStoreException {
+            String profileName, boolean requirePasswordChange) throws UserStoreException {
 
         throw new UserStoreException("Operation is not supported.");
     }
 
     @Override
     public User doAddUserWithID(String userName, Object credential, String[] roleList, Map<String, String> claims,
-                                String profileName, boolean requirePasswordChange) throws UserStoreException {
+            String profileName, boolean requirePasswordChange) throws UserStoreException {
 
         throw new UserStoreException("User store is operating in read only mode. Cannot write into the user store.");
     }
@@ -1760,23 +1779,23 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
             for (int i = 0; i < dnPartial.length(); i++) {
                 char currentChar = dnPartial.charAt(i);
                 switch (currentChar) {
-                    case '\\':
-                        sb.append("\\5c");
-                        break;
-                    case '*':
-                        sb.append("\\2a");
-                        break;
-                    case '(':
-                        sb.append("\\28");
-                        break;
-                    case ')':
-                        sb.append("\\29");
-                        break;
-                    case '\u0000':
-                        sb.append("\\00");
-                        break;
-                    default:
-                        sb.append(currentChar);
+                case '\\':
+                    sb.append("\\5c");
+                    break;
+                case '*':
+                    sb.append("\\2a");
+                    break;
+                case '(':
+                    sb.append("\\28");
+                    break;
+                case ')':
+                    sb.append("\\29");
+                    break;
+                case '\u0000':
+                    sb.append("\\00");
+                    break;
+                default:
+                    sb.append(currentChar);
                 }
             }
             return sb.toString();
@@ -2178,6 +2197,4 @@ public class UniqueIDReadOnlyLDAPUserStoreManager extends ReadOnlyLDAPUserStoreM
 
         return true;
     }
-
-
 }
