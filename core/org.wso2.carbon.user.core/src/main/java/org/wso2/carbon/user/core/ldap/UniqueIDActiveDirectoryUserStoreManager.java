@@ -1090,23 +1090,19 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
             while (answer.hasMoreElements()) {
                 SearchResult sr = (SearchResult) answer.next();
                 if (sr.getAttributes() != null) {
-                    Group group = new Group();
+
                     Attribute nameAttr = sr.getAttributes().get(groupNameProperty);
                     if (nameAttr != null) {
-                        String name = (String) nameAttr.get();
-                        groupAttributes = getGroupAttributes(name, propertyNames);
-                        name = UserCoreUtil.addDomainToName(name, domain);
+                        String displayName = (String) nameAttr.get();
+                        groupAttributes = getGroupAttributes(displayName, propertyNames);
+                        String groupId = getGroupIDFromAttributes(groupAttributes);
+                        String name = UserCoreUtil.addDomainToName(displayName, domain);
+                        String dn = sr.getNameInNamespace();
+                        String tenantDomain = getTenantDomainFromRoleDN(dn, name);
                         if (appendTenantDomain) {
-                            String dn = sr.getNameInNamespace();
-                            name = UserCoreUtil.addTenantDomainToEntry(name,
-                                    getTenantDomainFromRoleDN(dn, name));
+                            name = UserCoreUtil.addTenantDomainToEntry(name, tenantDomain);
                         }
-                        group.setGroupName(name);
-                        if (!groupAttributes.isEmpty()) {
-                            for (Map.Entry attrEntry : groupAttributes.entrySet()) {
-                                setValuesToGroup(group, attrEntry.getKey().toString(), attrEntry.getValue());
-                            }
-                        }
+                        Group group = new Group(groupId, name, displayName, tenantDomain, domain, groupAttributes);
                         groups.add(group);
                     }
                 }
@@ -1140,68 +1136,30 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
         return groups;
     }
 
-    private void setValuesToGroup(Group group, String property, Object value) {
+    private String getGroupIDFromAttributes(Map<String, String> groupAttributes) {
 
-        Map<String, String> attributes;
-        String attr = null;
-        byte[] bytes = new byte[0];
-        if (value instanceof String) {
-            attr = (String) value;
-        } else if (value instanceof byte[]) {
-            // return canonical representation of UUIDs or base64 encoded string of other binary data
-            // Active Directory attribute: objectGUID
-            // RFC 4530 attribute: entryUUID
+        if (!groupAttributes.isEmpty() && groupAttributes.containsKey(ActiveDirectoryUserStoreConstants.OBJECT_GUID)) {
+            Object value = groupAttributes.get(ActiveDirectoryUserStoreConstants.OBJECT_GUID);
+            byte[] bytes = new byte[0];
+            String id;
             bytes = (byte[]) value;
+            String transformToUUID =
+                    realmConfig.getUserStoreProperty(TRANSFORM_OBJECTGUID_TO_UUID);
+
+            boolean transformObjectGuidToUuid = StringUtils.isEmpty(transformToUUID) ||
+                    Boolean.parseBoolean(transformToUUID);
+            if (transformObjectGuidToUuid) {
+                final ByteBuffer bb = ByteBuffer.wrap(swapBytes(bytes));
+                id = new java.util.UUID(bb.getLong(), bb.getLong()).toString();
+            } else {
+                // Ignore transforming objectGUID to UUID canonical format
+                id = new String(Base64.encodeBase64((byte[]) value));
+            }
+            // Remove group id so that attributes can be directly used.
+            groupAttributes.remove(ActiveDirectoryUserStoreConstants.OBJECT_GUID);
+            return id;
         }
-        switch (property) {
-            case ActiveDirectoryUserStoreConstants.OBJECT_GUID :
-
-               String id;
-                String transformToUUID =
-                        realmConfig.getUserStoreProperty(TRANSFORM_OBJECTGUID_TO_UUID);
-
-                boolean transformObjectGuidToUuid = StringUtils.isEmpty(transformToUUID) ||
-                        Boolean.parseBoolean(transformToUUID);
-                if (transformObjectGuidToUuid) {
-                    final ByteBuffer bb = ByteBuffer.wrap(swapBytes(bytes));
-                    id = new java.util.UUID(bb.getLong(), bb.getLong()).toString();
-                } else {
-                    // Ignore transforming objectGUID to UUID canonical format
-                    id = new String(Base64.encodeBase64((byte[]) value));
-                }
-                group.setGroupID(id);
-                break;
-
-            case ActiveDirectoryUserStoreConstants.WHEN_CREATED :
-                if (group.getAttributes() == null) {
-                    attributes = new HashMap<>();
-                    attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CREATED, attr);
-                    group.setAttributes(attributes);
-                } else {
-                    attributes = group.getAttributes();
-                    if (attributes.get(ActiveDirectoryUserStoreConstants.WHEN_CREATED) != null) {
-                        attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CREATED, attr);
-                        group.setAttributes(attributes);
-                    }
-                }
-                break;
-            case ActiveDirectoryUserStoreConstants.WHEN_CHANGED:
-                if (group.getAttributes() == null) {
-                    attributes = new HashMap<>();
-                    attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CHANGED, attr);
-                    group.setAttributes(attributes);
-                } else {
-                    attributes = group.getAttributes();
-                    if (attributes.get(ActiveDirectoryUserStoreConstants.WHEN_CHANGED) != null) {
-                        attributes.put(ActiveDirectoryUserStoreConstants.WHEN_CHANGED, attr);
-                        group.setAttributes(attributes);
-                    }
-                }
-                break;
-
-            default:
-                break;
-        }
+        return null;
     }
 
     private Map<String, String> getGroupAttributes(String groupName, String[] propertyNames) throws
@@ -1220,7 +1178,6 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
                 Attribute attribute = i.next();
                 groupAttributes.put(attribute.getID(), attribute.get().toString());
             }
-
         }
         return groupAttributes;
     }
