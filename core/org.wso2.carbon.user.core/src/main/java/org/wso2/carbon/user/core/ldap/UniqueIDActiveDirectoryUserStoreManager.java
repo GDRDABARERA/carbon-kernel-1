@@ -75,6 +75,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.wso2.carbon.user.core.ldap.ActiveDirectoryUserStoreConstants.TRANSFORM_OBJECTGUID_TO_UUID;
+import static org.wso2.carbon.user.core.ldap.ActiveDirectoryUserStoreConstants.WHEN_CHANGED;
+import static org.wso2.carbon.user.core.ldap.ActiveDirectoryUserStoreConstants.WHEN_CREATED;
 
 /**
  * This class is responsible for manipulating Microsoft Active Directory(AD)and Active Directory
@@ -1077,8 +1079,7 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
         NamingEnumeration<SearchResult> answer = null;
         String[] propertyNames = {groupIDProperty,
                 ActiveDirectoryUserStoreConstants.WHEN_CHANGED, ActiveDirectoryUserStoreConstants.WHEN_CREATED};
-        Map<String, String> groupAttributes = new HashMap<>();
-
+        Map<String, Object> groupAttributes;
         try {
             dirContext = connectionSource.getContext();
             answer = dirContext.search(escapeDNForSearch(searchBase), finalFilter.toString(), searchCtls);
@@ -1102,7 +1103,8 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
                         if (appendTenantDomain) {
                             name = UserCoreUtil.addTenantDomainToEntry(name, tenantDomain);
                         }
-                        Group group = new Group(groupId, name, displayName, tenantDomain, domain, groupAttributes);
+                        Map<String, String> otherAttributes = populateOtherAttributes(groupAttributes);
+                        Group group = new Group(groupId, name, displayName, tenantDomain, domain, otherAttributes);
                         groups.add(group);
                     }
                 }
@@ -1136,16 +1138,13 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
         return groups;
     }
 
-    private String getGroupIDFromAttributes(Map<String, String> groupAttributes) {
+    private String getGroupIDFromAttributes(Map<String, Object> groupAttributes) {
 
-        if (!groupAttributes.isEmpty() && groupAttributes.containsKey(ActiveDirectoryUserStoreConstants.OBJECT_GUID)) {
-            Object value = groupAttributes.get(ActiveDirectoryUserStoreConstants.OBJECT_GUID);
-            byte[] bytes = new byte[0];
+        if (!groupAttributes.isEmpty() && groupAttributes.containsKey(OBJECT_GUID)) {
+            Object value = groupAttributes.get(OBJECT_GUID);
             String id;
-            bytes = (byte[]) value;
-            String transformToUUID =
-                    realmConfig.getUserStoreProperty(TRANSFORM_OBJECTGUID_TO_UUID);
-
+            byte[] bytes = (byte[]) value;
+            String transformToUUID = realmConfig.getUserStoreProperty(TRANSFORM_OBJECTGUID_TO_UUID);
             boolean transformObjectGuidToUuid = StringUtils.isEmpty(transformToUUID) ||
                     Boolean.parseBoolean(transformToUUID);
             if (transformObjectGuidToUuid) {
@@ -1156,16 +1155,16 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
                 id = new String(Base64.encodeBase64((byte[]) value));
             }
             // Remove group id so that attributes can be directly used.
-            groupAttributes.remove(ActiveDirectoryUserStoreConstants.OBJECT_GUID);
+            groupAttributes.remove(OBJECT_GUID);
             return id;
         }
         return null;
     }
 
-    private Map<String, String> getGroupAttributes(String groupName, String[] propertyNames) throws
+    private Map<String, Object> getGroupAttributes(String groupName, String[] propertyNames) throws
             NamingException, UserStoreException {
 
-        Map<String, String> groupAttributes = new HashMap<>();
+        Map<String, Object> groupAttributes = new HashMap<>();
         DirContext dirContext = getSearchBaseDirectoryContext(LDAPConstants.GROUP_SEARCH_BASE);
 
         NameParser ldapParser = dirContext.getNameParser("");
@@ -1176,52 +1175,23 @@ public class UniqueIDActiveDirectoryUserStoreManager extends UniqueIDReadWriteLD
             NamingEnumeration<? extends Attribute> i = attributeList.getAll();
             while (i.hasMore()) {
                 Attribute attribute = i.next();
-                groupAttributes.put(attribute.getID(), attribute.get().toString());
+                groupAttributes.put(attribute.getID(), attribute.get());
             }
         }
         return groupAttributes;
     }
 
-        /**
-         * Get the tenant domain for the provided distinguished name. If the role is
-         * not a shared role returns the super tenant domain
-         *
-         * @param dn
-         * @param roleName
-         * @return
-         */
-        public String getTenantDomainFromRoleDN (String dn, String roleName) {
+    private Map<String, String> populateOtherAttributes(Map<String, Object> groupAttributes) {
 
-            dn = dn.toLowerCase();
-            roleName = roleName.toLowerCase();
-            String sharedSearchBase = realmConfig.getUserStoreProperties().
-                    get(LDAPConstants.SHARED_GROUP_SEARCH_BASE);
-
-            if (sharedSearchBase != null) {
-                sharedSearchBase = sharedSearchBase.toLowerCase();
-                if (dn.indexOf(sharedSearchBase) > -1) {
-                    dn = dn.replaceAll(sharedSearchBase, "");
-                    dn = dn.replace(realmConfig.getUserStoreProperty(LDAPConstants.SHARED_GROUP_NAME_ATTRIBUTE).
-                            toLowerCase() + "=" + roleName, "");
-                    if (dn.indexOf(",") == 0) {
-                        dn = dn.substring(1);
-                    }
-                    int lastIndex = dn.indexOf(",");
-                    if (lastIndex > -1 && lastIndex == dn.length() - 1) {
-                        dn = dn.substring(0, dn.length() - 1);
-                    }
-
-                    String groupNameAttributeName = realmConfig.
-                            getUserStoreProperty(LDAPConstants.SHARED_TENANT_NAME_ATTRIBUTE).toLowerCase();
-                    dn = dn.replaceAll(groupNameAttributeName + "=", "");
-                    if (dn == null || dn.isEmpty()) {
-                        dn = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
-                    }
-                    return dn;
-                }
+        Map<String, String> attributes = new HashMap<>();
+        for (Map.Entry attribute : groupAttributes.entrySet()) {
+            if (WHEN_CREATED.equals(attribute.getKey().toString()) ||
+                    WHEN_CHANGED.equals(attribute.getKey().toString())) {
+                attributes.put(attribute.getKey().toString(), convertDateFormatFromAD(attribute.getValue().toString()));
+            } else {
+                attributes.put(attribute.getKey().toString(), attribute.getValue().toString());
             }
-            return CarbonContext.getThreadLocalCarbonContext().getTenantDomain();
         }
-
-
+        return attributes;
+    }
 }

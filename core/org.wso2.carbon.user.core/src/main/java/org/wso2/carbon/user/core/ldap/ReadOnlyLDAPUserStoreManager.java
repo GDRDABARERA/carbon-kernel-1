@@ -1526,30 +1526,30 @@ public class ReadOnlyLDAPUserStoreManager extends AbstractUserStoreManager {
         roleName = roleName.toLowerCase();
         String sharedSearchBase = realmConfig.getUserStoreProperties().
                 get(LDAPConstants.SHARED_GROUP_SEARCH_BASE);
+        if (sharedSearchBase != null) {
+            sharedSearchBase = sharedSearchBase.toLowerCase();
+            if (dn.indexOf(sharedSearchBase) > -1) {
+                dn = dn.replaceAll(sharedSearchBase, "");
+                dn = dn.replace(realmConfig.getUserStoreProperty(LDAPConstants.SHARED_GROUP_NAME_ATTRIBUTE).
+                        toLowerCase() + "=" + roleName, "");
+                if (dn.indexOf(",") == 0) {
+                    dn = dn.substring(1);
+                }
+                int lastIndex = dn.indexOf(",");
+                if (lastIndex > -1 && lastIndex == dn.length() - 1) {
+                    dn = dn.substring(0, dn.length() - 1);
+                }
 
-        sharedSearchBase = sharedSearchBase.toLowerCase();
-        if (dn.indexOf(sharedSearchBase) > -1) {
-            dn = dn.replaceAll(sharedSearchBase, "");
-            dn = dn.replace(realmConfig.getUserStoreProperty(LDAPConstants.SHARED_GROUP_NAME_ATTRIBUTE).
-                    toLowerCase() + "=" + roleName, "");
-            if (dn.indexOf(",") == 0) {
-                dn = dn.substring(1);
+                String groupNameAttributeName = realmConfig.
+                        getUserStoreProperty(LDAPConstants.SHARED_TENANT_NAME_ATTRIBUTE).toLowerCase();
+                dn = dn.replaceAll(groupNameAttributeName + "=", "");
+                if (dn == null || dn.isEmpty()) {
+                    dn = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
+                }
+                return dn;
             }
-            int lastIndex = dn.indexOf(",");
-            if (lastIndex > -1 && lastIndex == dn.length() - 1) {
-                dn = dn.substring(0, dn.length() - 1);
-            }
-
-            String groupNameAttributeName = realmConfig.
-                    getUserStoreProperty(LDAPConstants.SHARED_TENANT_NAME_ATTRIBUTE).toLowerCase();
-            dn = dn.replaceAll(groupNameAttributeName + "=", "");
-            if (dn == null || dn.isEmpty()) {
-                dn = MultitenantConstants.SUPER_TENANT_DOMAIN_NAME;
-            }
-            return dn;
-        } else {
-            return CarbonContext.getThreadLocalCarbonContext().getTenantDomain();
         }
+        return CarbonContext.getThreadLocalCarbonContext().getTenantDomain();
     }
 
     /**
